@@ -108,6 +108,18 @@ function setNav(section) {
   });
 }
 
+function dropText(drop) {
+  const amount = Number(drop.amount) || 0;
+  const variance = Number(drop.variance) || 0;
+  let amountText = "amount " + amount;
+  if (variance) {
+    const min = amount - variance;
+    const max = amount + variance;
+    amountText = min === max ? "amount " + min : "amount " + min + "-" + max;
+  }
+  return drop.chance + "% drop rate · " + amountText;
+}
+
 function replaceHash(path) {
   const next = "#" + path;
   if (location.hash !== next) history.replaceState(null, "", next);
@@ -144,7 +156,8 @@ async function boot() {
 function render(scroll) {
   const route = parseRoute();
   const section = route.parts[0] || "";
-  setNav(section === "item" ? "items" : section === "mob" ? "mobs" : section === "set" ? "sets" : section === "character" ? "characters" : section);
+  const navSection = { item: "items", mob: "mobs", set: "sets", character: "characters" }[section] || section;
+  setNav(navSection);
   const keepFocus = document.activeElement && document.activeElement.id === "q"
     ? document.activeElement.selectionStart
     : null;
@@ -167,6 +180,9 @@ function render(scroll) {
   } else if (section === "sets") {
     title = "Sets · BrawlQuest Armoury";
     html = viewSets(route);
+  } else if (section === "recipes") {
+    title = "Recipes · BrawlQuest Armoury";
+    html = viewRecipes(route);
   } else if (section === "set") {
     html = viewSet(route);
     title = (byId.sets.get(route.parts[1])?.name || "Set") + " · BrawlQuest Armoury";
@@ -190,10 +206,6 @@ function render(scroll) {
   }
 }
 
-function notesBlock() {
-  return `<p class="note">${esc(DB.meta.dropNote)}</p><p class="note">${esc(DB.meta.varianceNote)}</p>`;
-}
-
 function viewHome(route) {
   const q = route.params.get("q") || "";
   const counts = DB.meta.counts;
@@ -211,6 +223,7 @@ function viewHome(route) {
       <a href="#/items"><b>${num(counts.items)}</b> Items</a>
       <a href="#/mobs"><b>${num(counts.mobs)}</b> Mobs</a>
       <a href="#/sets"><b>${num(counts.sets)}</b> Sets</a>
+      <a href="#/recipes"><b>${num(counts.recipes)}</b> Recipes</a>
       <a href="#/characters"><b>${num(counts.characters)}</b> Characters</a>
     </div>`;
 }
@@ -301,7 +314,7 @@ function viewItem(route) {
     const who = mob
       ? `<a href="#/mob/${mob.id}">${esc(mob.name)}</a>`
       : `No mob in the catalogue has id ${num(drop.enemyId)}`;
-    return `<div class="drop">${mob ? icon(mob) : icon("", true)}<div>${who}<div class="sub">${num(drop.chance)}% · amount ${num(drop.amount)} · variance ${num(drop.variance)}</div></div></div>`;
+    return `<div class="drop">${mob ? icon(mob) : icon("", true)}<div>${who}<div class="sub">${esc(dropText(drop))}</div></div></div>`;
   }).join("");
   return `
     <p><a href="#/items">Items</a></p>
@@ -320,9 +333,8 @@ function viewItem(route) {
       ${stat("Attributes", attrText(item.attributes))}
     </div>
     <p>${set ? `Part of the <a href="#/set/${encodeURIComponent(set.id)}">${esc(set.name)}</a> set.` : "Not part of a named set."}</p>
-    ${item.note ? `<p class="note">${esc(item.note)}</p>` : ""}
+    ${recipeBlock(item)}
     <h2>Dropped by</h2>
-    ${notesBlock()}
     ${drops || "<p>No loot rows for this item.</p>"}`;
 }
 
@@ -347,12 +359,12 @@ function viewMob(route) {
   const mob = byId.mobs.get(Number(route.parts[1]));
   if (!mob) return `<h1>Mob not found</h1><p><a href="#/mobs">Back to mobs</a></p>`;
   const spells = mob.spells.length
-    ? mob.spells.map((s) => `<div class="drop"><div></div><div><strong>${esc(s.name)}</strong><div class="sub">Value ${esc(s.value || "—")} · frequency ${num(s.frequency)}</div></div></div>`).join("")
+    ? mob.spells.map((s) => `<p>${spellLine(s)}</p>`).join("")
     : "<p>No spells recorded.</p>";
   const drops = mob.drops.map((drop) => {
     const item = byId.items.get(drop.itemId);
     const who = item ? `<a href="#/item/${item.id}">${esc(item.name)}</a>` : `Item ${num(drop.itemId)} is not in the catalogue`;
-    return `<div class="drop">${item ? icon(item) : icon("", true)}<div>${who}<div class="sub">${num(drop.chance)}% · amount ${num(drop.amount)} · variance ${num(drop.variance)}</div></div></div>`;
+    return `<div class="drop">${item ? icon(item) : icon("", true)}<div>${who}<div class="sub">${esc(dropText(drop))}</div></div></div>`;
   }).join("");
   return `
     <p><a href="#/mobs">Mobs</a></p>
@@ -367,11 +379,9 @@ function viewMob(route) {
       ${stat("Can move", mob.canMove ? "Yes" : "No")}
       ${stat("Attributes", attrText(mob.attributes))}
     </div>
-    ${mob.note ? `<p class="note">${esc(mob.note)}</p>` : ""}
     <h2>Spells</h2>
     ${spells}
     <h2>Drops</h2>
-    ${notesBlock()}
     ${drops || "<p>No loot rows for this mob.</p>"}`;
 }
 
@@ -382,7 +392,6 @@ function viewSets(route) {
   list.sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
   return `
     <h1>Sets</h1>
-    <p class="lede">Sets are not a catalogue table. Pieces are grouped when gear shares a clear name stem, and a set needs at least two pieces.</p>
     <label for="q">Search sets</label>
     <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Set name" value="${esc(q)}">
     <p class="count">${num(list.length)} shown</p>
@@ -467,6 +476,7 @@ function viewCharacter(route) {
   return `
     <p><a href="#/characters">Characters</a></p>
     <h1>${esc(ch.name)}${ch.hardcore ? '<span class="badge">Hardcore</span>' : ""}</h1>
+    ${dollHtml(ch)}
     <div class="kvs">
       ${stat("Level", num(ch.level))}
       ${stat("XP", num(ch.xp))}
@@ -478,7 +488,202 @@ function viewCharacter(route) {
       ${stat("Hardcore", ch.hardcore ? "Yes" : "No")}
     </div>
     <h2>Equipped</h2>
-    <div class="gear">${slots}${buddy}</div>`;
+    <div class="gear">${slots}${buddy}</div>
+    ${ownedBlock("Mounts", ch.mounts)}
+    ${ownedBlock("Buddies", ch.buddies)}`;
+}
+
+
+function spellMob(spell) {
+  if (!spell.mobId) return null;
+  return byId.mobs.get(spell.mobId) || null;
+}
+
+function spellTarget(spell) {
+  const mob = spellMob(spell);
+  if (mob) return `<a href="#/mob/${mob.id}">${esc(mob.name)}</a>`;
+  return esc(spell.value || "");
+}
+
+function spellLine(spell) {
+  const every = `every ${num(spell.frequency)} seconds`;
+  if (spell.name === "Spawn") return `Spawns ${spellTarget(spell)} ${every}`;
+  if (spell.name === "Spawn Nearby") return `Spawns ${spellTarget(spell)} ${every} nearby`;
+  if (spell.name === "Spawn At Target") return `Spawns ${spellTarget(spell)} on its target ${every}`;
+  if (spell.name === "Death") return `Destroys itself ${every}`;
+  if (spell.name === "Poison") return `Poisons its target ${every}`;
+  const bits = [esc(spell.name)];
+  if (spell.value) bits.push(spellTarget(spell));
+  if (spell.frequency !== null && spell.frequency !== undefined && spell.frequency !== "") {
+    bits.push("frequency " + num(spell.frequency));
+  }
+  return bits.join(" · ");
+}
+
+function recipesForResult(itemId) {
+  return (DB.recipes || []).filter((recipe) => recipe.resultId === itemId);
+}
+
+function recipesUsing(itemId) {
+  return (DB.recipes || []).filter((recipe) => recipe.ingredients.some((part) => part.itemId === itemId));
+}
+
+function ingredientHtml(part) {
+  const item = byId.items.get(part.itemId);
+  const name = item ? `<a href="#/item/${item.id}">${esc(item.name)}</a>` : `Item ${num(part.itemId)}`;
+  const qty = part.amount === null || part.amount === undefined ? "" : `${num(part.amount)} × `;
+  return `<span class="ing">${item ? icon(item) : icon("", true)}<span>${qty}${name}</span></span>`;
+}
+
+function recipeCard(recipe) {
+  const result = byId.items.get(recipe.resultId);
+  const resultName = result ? `<a href="#/item/${result.id}">${esc(result.name)}</a>` : `Item ${num(recipe.resultId)}`;
+  const chance = recipe.kind === "forge" ? "Forge" : `${num(recipe.chance)}% chance`;
+  return `<div class="recipe">${result ? icon(result) : icon("", true)}<div><div>${resultName}</div><div class="sub">${chance}</div><div class="ings">${recipe.ingredients.map(ingredientHtml).join("")}</div></div></div>`;
+}
+
+function recipeBlock(item) {
+  const made = recipesForResult(item.id);
+  const used = recipesUsing(item.id);
+  let html = "";
+  if (made.length) {
+    html += `<h2>${made.length > 1 ? "Recipes" : "Recipe"}</h2>` + made.map(recipeCard).join("");
+  }
+  if (used.length) {
+    const links = used.map((recipe) => {
+      const result = byId.items.get(recipe.resultId);
+      const label = result ? esc(result.name) : "Item " + num(recipe.resultId);
+      const href = result ? `#/item/${result.id}` : "#/recipes";
+      const via = recipe.kind === "forge" ? "forge" : "craft";
+      return `<a href="${href}">${label}</a> (${via})`;
+    }).join(", ");
+    html += `<h2>Used in</h2><p>${links}</p>`;
+  }
+  return html;
+}
+
+function viewRecipes(route) {
+  const q = route.params.get("q") || "";
+  let list = (DB.recipes || []).slice();
+  if (q.trim()) {
+    list = list.filter((recipe) => {
+      const result = byId.items.get(recipe.resultId);
+      if (result && rank(result.name, q) < 9) return true;
+      return recipe.ingredients.some((part) => {
+        const item = byId.items.get(part.itemId);
+        return item && rank(item.name, q) < 9;
+      });
+    });
+  }
+  return `
+    <h1>Recipes</h1>
+    <label for="q">Search recipes</label>
+    <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Result or ingredient" value="${esc(q)}">
+    <p class="count">${num(list.length)} shown</p>
+    ${list.map(recipeCard).join("") || "<p>No recipes match.</p>"}`;
+}
+
+function dollLayers(ch) {
+  const layers = [];
+  const mountEntry = (ch.mounts || [])[0];
+  const mount = mountEntry ? byId.items.get(mountEntry.itemId) : null;
+  const boat = !!(mount && mount.boat);
+  if (mount && mount.mountBack && mount.mountBackW) {
+    layers.push({
+      src: mount.mountBack,
+      x: boat ? 0 : 6,
+      y: boat ? 0 : 9,
+      w: mount.mountBackW,
+      h: mount.mountBackH,
+      z: 1,
+    });
+  }
+  if (!boat && ch.shieldId && DB.meta.doll && DB.meta.doll.shieldW) {
+    layers.push({
+      src: DB.meta.doll.shieldBack,
+      x: 0,
+      y: 0,
+      w: DB.meta.doll.shieldW,
+      h: DB.meta.doll.shieldH,
+      z: 2,
+    });
+  }
+  const weapon = byId.items.get(ch.weaponId);
+  if (!boat && weapon && weapon.img && !weapon.imgMissing && weapon.w) {
+    layers.push({
+      src: weapon.img,
+      x: -(weapon.w - 32),
+      y: -(weapon.h - 32),
+      w: weapon.w,
+      h: weapon.h,
+      z: 3,
+    });
+  }
+  if (!boat && DB.meta.doll && DB.meta.doll.bodyW) {
+    layers.push({
+      src: DB.meta.doll.body,
+      x: 0,
+      y: 0,
+      w: DB.meta.doll.bodyW,
+      h: DB.meta.doll.bodyH,
+      z: 4,
+    });
+    for (const [key, z] of [["legsId", 5], ["chestId", 6], ["headId", 7]]) {
+      const piece = byId.items.get(ch[key]);
+      if (!piece || !piece.img || piece.imgMissing || !piece.w) continue;
+      let x = 0;
+      let y = 0;
+      if (piece.w > 32) x -= piece.w - 32;
+      if (piece.h > 32) y -= piece.h - 32;
+      layers.push({ src: piece.img, x, y, w: piece.w, h: piece.h, z });
+    }
+  }
+  if (!boat && mount && mount.mountFore && mount.mountForeW) {
+    layers.push({
+      src: mount.mountFore,
+      x: 6,
+      y: 9,
+      w: mount.mountForeW,
+      h: mount.mountForeH,
+      z: 8,
+    });
+  }
+  return layers;
+}
+
+function dollHtml(ch) {
+  const layers = dollLayers(ch);
+  if (!layers.length) return "";
+  let minX = 0;
+  let minY = 0;
+  let maxX = 32;
+  let maxY = 32;
+  for (const layer of layers) {
+    minX = Math.min(minX, layer.x);
+    minY = Math.min(minY, layer.y);
+    maxX = Math.max(maxX, layer.x + layer.w);
+    maxY = Math.max(maxY, layer.y + layer.h);
+  }
+  const scale = 4;
+  const width = (maxX - minX) * scale;
+  const height = (maxY - minY) * scale;
+  const imgs = layers.map((layer) => {
+    const left = (layer.x - minX) * scale;
+    const top = (layer.y - minY) * scale;
+    return `<img alt="" style="left:${left}px;top:${top}px;width:${layer.w * scale}px;height:${layer.h * scale}px;z-index:${layer.z}" src="${esc(imgUrl(layer.src))}">`;
+  }).join("");
+  return `<div class="doll" style="width:${width}px;height:${height}px">${imgs}</div>`;
+}
+
+function ownedBlock(title, rows) {
+  if (!rows || !rows.length) return "";
+  const cards = rows.map((row) => {
+    const item = byId.items.get(row.itemId);
+    if (!item) return "";
+    const extra = row.amount > 1 ? ` × ${num(row.amount)}` : "";
+    return `<a class="card" href="#/item/${item.id}">${icon(item)}<strong>${esc(item.name)}${extra}</strong><span class="sub">${esc(typeLabel(item.type))}</span></a>`;
+  }).join("");
+  return `<h2>${esc(title)}</h2><div class="cards">${cards}</div>`;
 }
 
 document.body.addEventListener("input", (event) => {

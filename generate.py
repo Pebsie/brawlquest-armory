@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate the BrawlQuest Armoury static data.
 
-Reads the content catalogue and the players table only. Does not copy either
-sqlite database, and never selects passwords, UID, Owner, coordinates,
-inventory, or hotbar.
+Reads the content catalogue, the players table, and inventory rows whose
+item type is mount or buddy. Does not copy either sqlite database, and never
+selects passwords, UID, Owner, coordinates, hotbar, or any other inventory.
 
 Usage (from this folder): python3 generate.py
 """
@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import sqlite3
+import struct
 from collections import defaultdict
 from pathlib import Path
 
@@ -36,26 +37,16 @@ PIECE_REST = {
     "jacket", "ears", "robe", "trousers", "facemask", "t-shirt",
 }
 
-DROP_NOTE = (
-    "Drop chance is an integer percent. The server rolls 0–99 and the item drops "
-    "if the roll is lower than the chance, so 100 is certain and 1 is about 1%. "
-    "Double-power is a random flag on a spawn, not a separate enemy, so no mob is "
-    "marked as double-power here. A double-power spawn rolls 0–49 instead, which doubles those odds."
-)
-VARIANCE_NOTE = (
-    "Amount variance of 0 is treated as 1. The extra amount is added only when the variance roll is greater than 1."
-)
-CRYSTAL_NOTE = (
-    "Old World Crystal is excluded from double-drop events: a luck double drop and a happy-hour drop do not double its amount."
-)
-FISH_NOTE = (
-    "Fish has a hardcoded extra drop that is not in this loot table. The server gives Pear, "
-    "unless a roll of 1 on a 0–9 roll replaces it with a random catalogue item. "
-    "The amount is a random whole number from 0 to 4."
-)
-PEAR_NOTE = (
-    "Fish can grant Pear as a hardcoded extra drop (see Fish). On a roll of 1 on a 0–9 roll, that extra drop is a random catalogue item instead."
-)
+
+def png_size(path: Path):
+    with path.open("rb") as handle:
+        handle.read(16)
+        return struct.unpack(">II", handle.read(8))
+
+
+def sibling_png(img: str, name: str) -> str:
+    parent = str(Path(img).parent).replace("\\", "/")
+    return f"{parent}/{name}"
 
 
 def parse_attrs(raw) -> list:
@@ -226,10 +217,27 @@ def main() -> None:
             "attributes": parse_attrs(row["Attributes"]),
             "img": img,
             "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
+            "w": 0,
+            "h": 0,
             "setId": None,
-            "note": None,
             "drops": [],
         })
+        if img and (CLIENT_ROOT / img).is_file():
+            items[-1]["w"], items[-1]["h"] = png_size(CLIENT_ROOT / img)
+        if (row["Type"] or "") == "mount" and img:
+            back = sibling_png(img, "back.png")
+            fore = sibling_png(img, "fore.png")
+            items[-1]["boat"] = "boat" in (row["Name"] or "").lower()
+            items[-1]["mountBack"] = back
+            items[-1]["mountFore"] = fore if (CLIENT_ROOT / fore).is_file() else None
+            if (CLIENT_ROOT / back).is_file():
+                items[-1]["mountBackW"], items[-1]["mountBackH"] = png_size(CLIENT_ROOT / back)
+            else:
+                items[-1]["mountBackW"] = items[-1]["mountBackH"] = 0
+            if items[-1]["mountFore"]:
+                items[-1]["mountForeW"], items[-1]["mountForeH"] = png_size(CLIENT_ROOT / items[-1]["mountFore"])
+            else:
+                items[-1]["mountForeW"] = items[-1]["mountForeH"] = 0
 
     sets = derive_sets(items)
     set_by_item = {}
@@ -238,10 +246,6 @@ def main() -> None:
             set_by_item[item_id] = group["id"]
     for it in items:
         it["setId"] = set_by_item.get(it["id"])
-        if it["id"] == 53:
-            it["note"] = CRYSTAL_NOTE
-        elif it["id"] == 23:
-            it["note"] = PEAR_NOTE
 
     enemy_ids = {row["id"] for row in enemy_rows}
     item_ids = {it["id"] for it in items}
@@ -277,12 +281,21 @@ def main() -> None:
     for it in items:
         it["drops"] = drops_by_item.get(it["id"], [])
 
+    enemy_by_name = {}
+    for row in enemy_rows:
+        enemy_by_name[(row["Name"] or "").casefold()] = row["id"]
     spells_by_enemy = defaultdict(list)
+    unmatched_spell_values = []
     for row in spell_rows:
+        value = "" if row["Value"] is None else str(row["Value"])
+        mob_id = enemy_by_name.get(value.casefold()) if value.strip() else None
+        if value.strip() and mob_id is None and (row["Name"] or "").startswith("Spawn"):
+            unmatched_spell_values.append({"enemyId": row["EnemyID"], "name": row["Name"], "value": value})
         spells_by_enemy[row["EnemyID"]].append({
             "name": row["Name"] or "",
-            "value": "" if row["Value"] is None else str(row["Value"]),
+            "value": value,
             "frequency": row["Frequency"],
+            "mobId": mob_id,
         })
 
     mobs = []
@@ -304,11 +317,16 @@ def main() -> None:
             "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
             "spells": spells_by_enemy.get(row["id"], []),
             "drops": drops_by_enemy.get(row["id"], []),
-            "note": FISH_NOTE if (row["Name"] or "") == "Fish" else None,
         })
     for it in items:
         if it["img"]:
             image_paths.add(it["img"])
+        if it.get("mountBack"):
+            image_paths.add(it["mountBack"])
+        if it.get("mountFore"):
+            image_paths.add(it["mountFore"])
+    image_paths.add("assets/player/base.png")
+    image_paths.add("assets/player/gen/shield false.png")
 
     by_img = defaultdict(list)
     for it in items:
@@ -338,7 +356,70 @@ def main() -> None:
             "legsId": row["LegArmourID"] or 0,
             "shieldId": row["ShieldID"] or 0,
             "buddyIds": buddy_ids,
+            "mounts": [],
+            "buddies": [],
         })
+
+    mount_buddy = {it["id"]: it["type"] for it in items if it["type"] in ("mount", "buddy")}
+    id_list = ",".join(str(i) for i in sorted(mount_buddy))
+    # Inventory is limited to mount and buddy item ids. No other rows are read.
+    inv_rows = users.execute(
+        "SELECT id, PlayerID, ItemID, Amount FROM inventory "
+        f"WHERE ItemID IN ({id_list}) ORDER BY id"
+    ).fetchall() if id_list else []
+    owned_amount = defaultdict(lambda: defaultdict(int))
+    owned_order = defaultdict(list)
+    for inv in inv_rows:
+        if inv["ItemID"] not in mount_buddy:
+            continue
+        bucket = owned_amount[inv["PlayerID"]]
+        if inv["ItemID"] not in bucket:
+            owned_order[inv["PlayerID"]].append(inv["ItemID"])
+        bucket[inv["ItemID"]] += inv["Amount"] or 0
+    char_by_id = {ch["id"]: ch for ch in characters}
+    for pid, order in owned_order.items():
+        ch = char_by_id.get(pid)
+        if not ch:
+            continue
+        for item_id in order:
+            entry = {"itemId": item_id, "amount": owned_amount[pid][item_id]}
+            kind = mount_buddy[item_id]
+            if kind == "mount":
+                ch["mounts"].append(entry)
+            elif kind == "buddy":
+                ch["buddies"].append(entry)
+
+    recipes = []
+    for row in content.execute("SELECT id, ItemID, Items, Chance FROM craft ORDER BY id"):
+        try:
+            raw_items = json.loads(row["Items"] or "[]")
+        except json.JSONDecodeError:
+            print("bad craft json", row["id"])
+            continue
+        recipes.append({
+            "id": row["id"],
+            "kind": "craft",
+            "resultId": row["ItemID"],
+            "chance": row["Chance"],
+            "ingredients": [
+                {"itemId": part.get("ItemID"), "amount": part.get("Amount")}
+                for part in raw_items
+            ],
+        })
+    # Forge rows are a straight conversion: the entered item becomes the result.
+    for row in content.execute("SELECT id, EnterID, ResultID FROM forge ORDER BY id"):
+        recipes.append({
+            "id": f"forge-{row['id']}",
+            "kind": "forge",
+            "resultId": row["ResultID"],
+            "chance": None,
+            "ingredients": [{"itemId": row["EnterID"]}],
+        })
+
+    body_path = CLIENT_ROOT / "assets/player/base.png"
+    shield_path = CLIENT_ROOT / "assets/player/gen/shield false.png"
+    body_w, body_h = png_size(body_path) if body_path.is_file() else (0, 0)
+    shield_w, shield_h = png_size(shield_path) if shield_path.is_file() else (0, 0)
 
     missing_images = sorted(p for p in image_paths if not (CLIENT_ROOT / p).is_file())
     copied = 0
@@ -356,8 +437,15 @@ def main() -> None:
 
     payload = {
         "meta": {
-            "dropNote": DROP_NOTE,
-            "varianceNote": VARIANCE_NOTE,
+            "rev": "20261004-doll",
+            "doll": {
+                "body": "assets/player/base.png",
+                "bodyW": body_w,
+                "bodyH": body_h,
+                "shieldBack": "assets/player/gen/shield false.png",
+                "shieldW": shield_w,
+                "shieldH": shield_h,
+            },
             "counts": {
                 "items": len(items),
                 "mobs": len(mobs),
@@ -365,11 +453,13 @@ def main() -> None:
                 "characters": len(characters),
                 "loot": len(loot_rows),
                 "spells": len(spell_rows),
+                "recipes": len(recipes),
             },
         },
         "items": items,
         "mobs": mobs,
         "sets": sets,
+        "recipes": recipes,
         "characters": characters,
     }
     out = ROOT / "data" / "armory.json"
@@ -387,8 +477,11 @@ def main() -> None:
         print(f"  {group['id']}: {group['name']} -> {names}")
     print("missing images", missing_images)
     print("copied images", copied)
+    print("recipes", len(recipes))
+    print("unmatched spawn values", unmatched_spell_values)
     print("broken enemy loot", broken_enemies)
     print("broken item loot", broken_items)
+    print("owned mounts", sum(len(ch["mounts"]) for ch in characters), "buddies", sum(len(ch["buddies"]) for ch in characters))
     print("json bytes", out.stat().st_size)
     # Guard: the sqlite files must not be written into the site.
     assert not list(ROOT.rglob("*.db"))

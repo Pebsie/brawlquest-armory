@@ -275,6 +275,33 @@ p { margin: 0.4rem 0 0.8rem; }
 .foot { color: var(--muted); font-size: 0.9rem; padding-bottom: 2rem; }
 .err { color: var(--danger); }
 
+
+.doll {
+  position: relative;
+  margin: 0.4rem 0 1rem;
+  image-rendering: pixelated;
+  background: #100e0b;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.doll img {
+  position: absolute;
+  max-width: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.recipe {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.ings, .ing { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; }
+.ing { min-height: 44px; }
+.ing .icon, .ing .ph { width: 40px; height: 40px; }
+
 @media (max-width: 640px) {
   .row { flex-direction: column; align-items: flex-start; }
   .row .meta { text-align: left; }
