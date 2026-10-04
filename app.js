@@ -29,7 +29,7 @@ const SLOT_ORDER = [
 ];
 
 let DB = null;
-const byId = { items: new Map(), mobs: new Map(), sets: new Map(), characters: new Map() };
+const byId = { items: new Map(), mobs: new Map(), sets: new Map(), characters: new Map(), quests: new Map(), npcs: new Map() };
 let charShown = 80;
 let searchTimer = 0;
 
@@ -58,14 +58,18 @@ function imgUrl(path) {
 }
 
 function icon(itemOrPath, missing, large) {
-  const path = typeof itemOrPath === "string" ? itemOrPath : itemOrPath && itemOrPath.img;
-  const gone = typeof itemOrPath === "string" ? missing : (missing || (itemOrPath && itemOrPath.imgMissing) || !path);
+  const obj = typeof itemOrPath === "string" ? null : itemOrPath;
+  const path = typeof itemOrPath === "string" ? itemOrPath : obj && obj.img;
+  const gone = typeof itemOrPath === "string" ? missing : (missing || (obj && obj.imgMissing) || !path);
   const cls = large ? "lg" : "";
   if (gone || !path) {
     return `<span class="ph ${cls}" role="img" aria-label="No image">No image</span>`;
   }
-  const size = large ? 96 : 64;
-  return `<img class="icon ${cls}" alt="" width="${size}" height="${size}" src="${esc(imgUrl(path))}">`;
+  const scale = large ? 4 : 2;
+  const w = obj && obj.w ? obj.w * scale : 0;
+  const h = obj && obj.h ? obj.h * scale : 0;
+  const dim = w && h ? ` width="${w}" height="${h}" style="width:${w}px;height:${h}px"` : "";
+  return `<img class="icon ${cls}" alt=""${dim} src="${esc(imgUrl(path))}">`;
 }
 
 function typeLabel(type) {
@@ -149,6 +153,11 @@ async function boot() {
   for (const mob of DB.mobs) byId.mobs.set(mob.id, mob);
   for (const set of DB.sets) byId.sets.set(set.id, set);
   for (const ch of DB.characters) byId.characters.set(ch.id, ch);
+  for (const quest of DB.quests || []) {
+    quest.name = quest.title;
+    byId.quests.set(quest.id, quest);
+  }
+  for (const npc of DB.npcs || []) byId.npcs.set(npc.id, npc);
   window.addEventListener("hashchange", () => render(true));
   render(true);
 }
@@ -156,7 +165,7 @@ async function boot() {
 function render(scroll) {
   const route = parseRoute();
   const section = route.parts[0] || "";
-  const navSection = { item: "items", mob: "mobs", set: "sets", character: "characters" }[section] || section;
+  const navSection = { item: "items", mob: "mobs", set: "sets", character: "characters", quest: "quests", npc: "npcs" }[section] || section;
   setNav(navSection);
   const keepFocus = document.activeElement && document.activeElement.id === "q"
     ? document.activeElement.selectionStart
@@ -186,6 +195,18 @@ function render(scroll) {
   } else if (section === "set") {
     html = viewSet(route);
     title = (byId.sets.get(route.parts[1])?.name || "Set") + " · BrawlQuest Armoury";
+  } else if (section === "quests") {
+    title = "Quests · BrawlQuest Armoury";
+    html = viewQuests(route);
+  } else if (section === "quest") {
+    html = viewQuest(route);
+    title = (byId.quests.get(Number(route.parts[1]))?.title || "Quest") + " · BrawlQuest Armoury";
+  } else if (section === "npcs") {
+    title = "NPCs · BrawlQuest Armoury";
+    html = viewNpcs(route);
+  } else if (section === "npc") {
+    html = viewNpc(route);
+    title = (byId.npcs.get(Number(route.parts[1]))?.name || "NPC") + " · BrawlQuest Armoury";
   } else if (section === "characters") {
     title = "Characters · BrawlQuest Armoury";
     html = viewCharacters(route);
@@ -215,8 +236,8 @@ function viewHome(route) {
   }
   return `
     <h1>BrawlQuest Armoury</h1>
-    <p class="lede">Look up gear, who drops it, mobs, named sets, and every character.</p>
-    <label for="q">Search items, mobs, sets, and characters</label>
+    <p class="lede">Gear, mobs, quests, NPCs, and every character.</p>
+    <label for="q">Search</label>
     <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Try a name, a mob, or a weapon" value="${esc(q)}">
     ${results}
     <div class="home-links">
@@ -224,6 +245,8 @@ function viewHome(route) {
       <a href="#/mobs"><b>${num(counts.mobs)}</b> Mobs</a>
       <a href="#/sets"><b>${num(counts.sets)}</b> Sets</a>
       <a href="#/recipes"><b>${num(counts.recipes)}</b> Recipes</a>
+      <a href="#/quests"><b>${num(counts.quests)}</b> Quests</a>
+      <a href="#/npcs"><b>${num(counts.npcs)}</b> NPCs</a>
       <a href="#/characters"><b>${num(counts.characters)}</b> Characters</a>
     </div>`;
 }
@@ -244,7 +267,9 @@ function homeResults(q) {
   const mobs = takeMatches(DB.mobs, q, 8);
   const sets = takeMatches(DB.sets, q, 8);
   const chars = takeMatches(DB.characters, q, 12);
-  if (!items.length && !mobs.length && !sets.length && !chars.length) {
+  const quests = takeMatches(DB.quests, q, 8);
+  const npcs = takeMatches(DB.npcs, q, 8);
+  if (!items.length && !mobs.length && !sets.length && !chars.length && !quests.length && !npcs.length) {
     return `<p>Nothing matches “${esc(q)}”.</p>`;
   }
   const block = (title, rows, inner) => rows.length
@@ -254,6 +279,8 @@ function homeResults(q) {
     block("Items", items, (it) => rowLink(`#/item/${it.id}`, it.name, typeLabel(it.type))) +
     block("Mobs", mobs, (m) => rowLink(`#/mob/${m.id}`, m.name, `${num(m.hp)} HP · ${num(m.atk)} ATK`)) +
     block("Sets", sets, (s) => rowLink(`#/set/${encodeURIComponent(s.id)}`, s.name, `${s.itemIds.length} pieces`)) +
+    block("Quests", quests, (quest) => rowLink(`#/quest/${quest.id}`, quest.title, objectiveText(quest))) +
+    block("NPCs", npcs, (npc) => rowLink(`#/npc/${npc.id}`, npc.name, npc.faction || "No faction")) +
     block("Characters", chars, (c) => rowLink(`#/character/${c.id}`, c.name, charMeta(c)))
   );
 }
@@ -684,6 +711,144 @@ function ownedBlock(title, rows) {
     return `<a class="card" href="#/item/${item.id}">${icon(item)}<strong>${esc(item.name)}${extra}</strong><span class="sub">${esc(typeLabel(item.type))}</span></a>`;
   }).join("");
   return `<h2>${esc(title)}</h2><div class="cards">${cards}</div>`;
+}
+
+
+function objectiveText(quest) {
+  const n = num(quest.required);
+  if (quest.type === "kill") return `Kill ${n} ${quest.value}`;
+  if (quest.type === "gather") return `Gather ${n} ${quest.value}`;
+  if (quest.type === "go") return `Go to ${quest.x}, ${quest.y}`;
+  return `${quest.type || "Objective"}: ${quest.value} (${n})`;
+}
+
+function npcLink(id, fallback) {
+  const npc = byId.npcs.get(id);
+  if (!npc) return esc(fallback || "Unknown NPC");
+  return `<a href="#/npc/${npc.id}">${esc(npc.name)}</a>`;
+}
+
+function grantText(part) {
+  const item = byId.items.get(part.itemId);
+  const name = item ? `<a href="#/item/${item.id}">${esc(item.name)}</a>` : `Item ${num(part.itemId)}`;
+  const amount = Number(part.amount) || 0;
+  if (amount < 0) return `Takes ${num(Math.abs(amount))} ${name}`;
+  return `Gives ${num(amount)} ${name}`;
+}
+
+function viewQuests(route) {
+  const q = route.params.get("q") || "";
+  let list = (DB.quests || []).slice();
+  if (q.trim()) list = list.filter((quest) => rank(quest.title, q) < 9 || lower(quest.desc).includes(lower(q)));
+  list.sort((a, b) => rank(a.title, q) - rank(b.title, q) || a.title.localeCompare(b.title, "en-GB"));
+  return `
+    <h1>Quests</h1>
+    <label for="q">Search quests</label>
+    <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Quest name" value="${esc(q)}">
+    <p class="count">${num(list.length)} shown</p>
+    <div class="rows">${list.map((quest) => rowLink(`#/quest/${quest.id}`, quest.title, objectiveText(quest))).join("") || "<p>No quests match.</p>"}</div>`;
+}
+
+function viewQuest(route) {
+  const quest = byId.quests.get(Number(route.parts[1]));
+  if (!quest) return `<h1>Quest not found</h1><p><a href="#/quests">Back to quests</a></p>`;
+  const rewards = (quest.items || []).map((part) => `<p>${grantText(part)}</p>`).join("");
+  const trigger = quest.trigger
+    ? `<a href="#/npc/${quest.giverNpcId}/${encodeURIComponent(quest.trigger)}">${esc(quest.trigger)}</a>`
+    : "—";
+  const end = quest.endConversation
+    ? `<a href="#/npc/${quest.returnNpcId}/${encodeURIComponent(quest.endConversation)}">${esc(quest.endConversation)}</a>`
+    : "—";
+  return `
+    <p><a href="#/quests">Quests</a></p>
+    <div class="hero">${icon(quest, false, true)}
+      <div class="hero-text"><h1>${esc(quest.title)}</h1><p>${esc(quest.desc || "")}</p></div>
+    </div>
+    <div class="kvs">
+      ${stat("XP", num(quest.xp))}
+      ${stat("Objective", objectiveText(quest))}
+    </div>
+    <p>Giver: ${npcLink(quest.giverNpcId)}</p>
+    <p>Return to: ${npcLink(quest.returnNpcId, quest.returnNpcName)}${quest.returnNpcName && byId.npcs.get(quest.returnNpcId) && byId.npcs.get(quest.returnNpcId).name !== quest.returnNpcName ? " (" + esc(quest.returnNpcName) + ")" : ""}</p>
+    <p>${quest.requireReturn ? "Must be handed back." : "Completes without a return."}</p>
+    <p>Starts at ${trigger}. Ends at ${end}.</p>
+    ${rewards ? `<h2>Rewards</h2>${rewards}` : ""}`;
+}
+
+function viewNpcs(route) {
+  const q = route.params.get("q") || "";
+  let list = (DB.npcs || []).slice();
+  if (q.trim()) list = list.filter((npc) => rank(npc.name, q) < 9 || lower(npc.faction).includes(lower(q)));
+  list.sort((a, b) => rank(a.name, q) - rank(b.name, q) || a.name.localeCompare(b.name, "en-GB") || a.id - b.id);
+  return `
+    <h1>NPCs</h1>
+    <label for="q">Search NPCs</label>
+    <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="NPC name" value="${esc(q)}">
+    <p class="count">${num(list.length)} shown</p>
+    <div class="cards">${list.map((npc) => `<a class="card" href="#/npc/${npc.id}">${icon(npc)}<strong>${esc(npc.name)}</strong><span class="sub">${esc(npc.faction || "No faction")}</span></a>`).join("") || "<p>No NPCs match.</p>"}</div>`;
+}
+
+function viewNpc(route) {
+  const npc = byId.npcs.get(Number(route.parts[1]));
+  if (!npc) return `<h1>NPC not found</h1><p><a href="#/npcs">Back to NPCs</a></p>`;
+  const nodeId = route.parts[2] ? decodeURIComponent(route.parts[2]) : "";
+  const questLine = (ids, label) => {
+    if (!ids || !ids.length) return "";
+    const links = ids.map((id) => {
+      const quest = byId.quests.get(id);
+      return quest ? `<a href="#/quest/${quest.id}">${esc(quest.title)}</a>` : `Quest ${num(id)}`;
+    }).join(", ");
+    return `<p>${label}: ${links}</p>`;
+  };
+  return `
+    <p><a href="#/npcs">NPCs</a></p>
+    <div class="hero">${icon(npc, false, true)}
+      <div class="hero-text">
+        <h1>${esc(npc.name)}</h1>
+        <p>${esc(npc.faction || "No faction")}</p>
+        <p class="sub">Spawn ${num(npc.spawnX)}, ${num(npc.spawnY)}</p>
+      </div>
+    </div>
+    ${questLine(npc.gives, "Gives")}
+    ${questLine(npc.returns, "Return here")}
+    <h2>Dialogue</h2>
+    ${dialogueHtml(npc, nodeId)}`;
+}
+
+function dialogueHtml(npc, nodeId) {
+  if (!npc.conversation) return "<p>No dialogue.</p>";
+  const start = DB.dialogue[npc.conversation];
+  if (!start && !nodeId) return `<p>No line for ${esc(npc.conversation)}.</p>`;
+  if (nodeId === "end") {
+    return `<div class="talk"><p>The conversation ends.</p><p><a class="choice" href="#/npc/${npc.id}">Start over</a></p></div>`;
+  }
+  const key = nodeId || npc.conversation;
+  const node = DB.dialogue[key];
+  if (!node) return `<p>That line is not in the catalogue. <a href="#/npc/${npc.id}">Start over</a></p>`;
+  const portrait = (!node.imgMissing && node.img) ? node : npc;
+  const effects = [];
+  for (const part of node.items || []) effects.push(`<p>${grantText(part)}</p>`);
+  if (node.reputation) effects.push(`<p>Reputation ${node.reputation > 0 ? "+" : ""}${node.reputation}</p>`);
+  for (const id of node.questIds || []) {
+    const quest = byId.quests.get(id);
+    effects.push(`<p>Starts <a href="#/quest/${id}">${esc(quest ? quest.title : "quest " + id)}</a></p>`);
+  }
+  for (const id of node.turnInIds || []) {
+    const quest = byId.quests.get(id);
+    effects.push(`<p>Hands in <a href="#/quest/${id}">${esc(quest ? quest.title : "quest " + id)}</a></p>`);
+  }
+  const options = (node.options || []).map((option) => {
+    const next = option.next === "1" ? "end" : encodeURIComponent(option.next);
+    return `<a class="choice" href="#/npc/${npc.id}/${next}">${esc(option.text)}</a>`;
+  }).join("");
+  const restart = key === npc.conversation ? "" : `<p><a href="#/npc/${npc.id}">Start over</a></p>`;
+  return `<div class="talk">
+    <div class="talk-portrait">${icon(portrait, false, true)}</div>
+    <p class="line">${esc(node.title)}</p>
+    ${effects.join("")}
+    <div class="choices">${options || "<p>The conversation ends.</p>"}</div>
+    ${restart}
+  </div>`;
 }
 
 document.body.addEventListener("input", (event) => {

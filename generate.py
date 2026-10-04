@@ -49,6 +49,32 @@ def sibling_png(img: str, name: str) -> str:
     return f"{parent}/{name}"
 
 
+
+OPTION_RE = re.compile(r"\['(.*?)'\s*,\s*'([^']*)'\]", re.DOTALL)
+
+
+def parse_options(raw):
+    """Options is a list of [reply, next identifier]. Next is "1" when the talk ends."""
+    text = "" if raw is None else str(raw).strip()
+    if not text:
+        return []
+    found = OPTION_RE.findall(text)
+    if not found:
+        raise ValueError("unparsed options: " + text[:120])
+    return [{"text": label, "next": nxt} for label, nxt in found]
+
+
+def parse_item_grants(raw):
+    text = "" if raw is None else str(raw).strip()
+    if text in ("", "[]", "None"):
+        return []
+    data = json.loads(text)
+    out = []
+    for part in data:
+        out.append({"itemId": part.get("ItemID"), "amount": part.get("Amount")})
+    return out
+
+
 def parse_attrs(raw) -> list:
     if raw is None:
         return []
@@ -315,6 +341,8 @@ def main() -> None:
             "attributes": parse_attrs(row["Attributes"]),
             "img": img,
             "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
+            "w": png_size(CLIENT_ROOT / img)[0] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "h": png_size(CLIENT_ROOT / img)[1] if img and (CLIENT_ROOT / img).is_file() else 0,
             "spells": spells_by_enemy.get(row["id"], []),
             "drops": drops_by_enemy.get(row["id"], []),
         })
@@ -416,6 +444,113 @@ def main() -> None:
             "ingredients": [{"itemId": row["EnterID"]}],
         })
 
+    npc_rows = content.execute(
+        "SELECT id, Name, ImgPath, Faction, Conversation, SpawnX, SpawnY FROM npc ORDER BY id"
+    ).fetchall()
+    quest_rows = content.execute(
+        "SELECT id, Title, Desc, ImgPath, Type, Value, ValueRequired, XP, ItemsGiven, "
+        "ConversationTrigger, ReturnNPCID, ReturnNPCName, EndConversation, RequireReturn, "
+        "X, Y, GiverNPCID FROM quest ORDER BY id"
+    ).fetchall()
+    conv_rows = content.execute(
+        "SELECT id, Identifier, Title, ImgPath, Options, ReputationChange, ItemsGiven, QuestStart "
+        "FROM conversation ORDER BY id"
+    ).fetchall()
+
+    quests = []
+    for row in quest_rows:
+        img = row["ImgPath"] or ""
+        if img:
+            image_paths.add(img)
+        quests.append({
+            "id": row["id"],
+            "title": row["Title"] or "",
+            "desc": row["Desc"] or "",
+            "img": img,
+            "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
+            "w": png_size(CLIENT_ROOT / img)[0] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "h": png_size(CLIENT_ROOT / img)[1] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "type": row["Type"] or "",
+            "value": row["Value"] or "",
+            "required": row["ValueRequired"],
+            "xp": row["XP"],
+            "items": parse_item_grants(row["ItemsGiven"]),
+            "trigger": row["ConversationTrigger"] or "",
+            "returnNpcId": row["ReturnNPCID"],
+            "returnNpcName": row["ReturnNPCName"] or "",
+            "endConversation": row["EndConversation"] or "",
+            "requireReturn": row["RequireReturn"],
+            "x": row["X"],
+            "y": row["Y"],
+            "giverNpcId": row["GiverNPCID"],
+        })
+
+    quests_by_trigger = defaultdict(list)
+    quests_by_end = defaultdict(list)
+    for quest in quests:
+        if quest["trigger"]:
+            quests_by_trigger[quest["trigger"]].append(quest["id"])
+        if quest["endConversation"]:
+            quests_by_end[quest["endConversation"]].append(quest["id"])
+
+    nodes = {}
+    for row in conv_rows:
+        img = row["ImgPath"] or ""
+        if img:
+            image_paths.add(img)
+        rep_raw = row["ReputationChange"]
+        try:
+            reputation = float(rep_raw) if rep_raw not in (None, "") else 0
+        except ValueError:
+            reputation = 0
+        ident = row["Identifier"] or ""
+        if ident in nodes:
+            print("duplicate dialogue identifier, keeping first", ident, "id", row["id"])
+            continue
+        nodes[ident] = {
+            "id": row["id"],
+            "identifier": ident,
+            "title": row["Title"] or "",
+            "img": img,
+            "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
+            "w": png_size(CLIENT_ROOT / img)[0] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "h": png_size(CLIENT_ROOT / img)[1] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "options": parse_options(row["Options"]),
+            "reputation": reputation,
+            "items": parse_item_grants(row["ItemsGiven"]),
+            "questIds": quests_by_trigger.get(ident, []),
+            "turnInIds": quests_by_end.get(ident, []),
+        }
+
+    gives = defaultdict(list)
+    returns = defaultdict(list)
+    for quest in quests:
+        gives[quest["giverNpcId"]].append(quest["id"])
+        returns[quest["returnNpcId"]].append(quest["id"])
+
+    npcs = []
+    for row in npc_rows:
+        img = row["ImgPath"] or ""
+        if img:
+            image_paths.add(img)
+        npcs.append({
+            "id": row["id"],
+            "name": row["Name"] or "",
+            "img": img,
+            "imgMissing": not (img and (CLIENT_ROOT / img).is_file()),
+            "w": png_size(CLIENT_ROOT / img)[0] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "h": png_size(CLIENT_ROOT / img)[1] if img and (CLIENT_ROOT / img).is_file() else 0,
+            "faction": row["Faction"] or "",
+            "conversation": row["Conversation"] or "",
+            "spawnX": row["SpawnX"],
+            "spawnY": row["SpawnY"],
+            "gives": gives.get(row["id"], []),
+            "returns": returns.get(row["id"], []),
+        })
+
+    for font in ("assets/ui/fonts/rainyhearts.ttf", "assets/ui/fonts/BMmini.TTF"):
+        image_paths.add(font)
+
     body_path = CLIENT_ROOT / "assets/player/base.png"
     shield_path = CLIENT_ROOT / "assets/player/gen/shield false.png"
     body_w, body_h = png_size(body_path) if body_path.is_file() else (0, 0)
@@ -437,7 +572,7 @@ def main() -> None:
 
     payload = {
         "meta": {
-            "rev": "20261004-doll",
+            "rev": "20261004-quests",
             "doll": {
                 "body": "assets/player/base.png",
                 "bodyW": body_w,
@@ -454,12 +589,18 @@ def main() -> None:
                 "loot": len(loot_rows),
                 "spells": len(spell_rows),
                 "recipes": len(recipes),
+                "quests": len(quests),
+                "npcs": len(npcs),
+                "dialogue": len(nodes),
             },
         },
         "items": items,
         "mobs": mobs,
         "sets": sets,
         "recipes": recipes,
+        "quests": quests,
+        "npcs": npcs,
+        "dialogue": nodes,
         "characters": characters,
     }
     out = ROOT / "data" / "armory.json"
@@ -481,6 +622,7 @@ def main() -> None:
     print("unmatched spawn values", unmatched_spell_values)
     print("broken enemy loot", broken_enemies)
     print("broken item loot", broken_items)
+    print("quests", len(quests), "npcs", len(npcs), "dialogue", len(nodes))
     print("owned mounts", sum(len(ch["mounts"]) for ch in characters), "buddies", sum(len(ch["buddies"]) for ch in characters))
     print("json bytes", out.stat().st_size)
     # Guard: the sqlite files must not be written into the site.
