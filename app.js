@@ -330,6 +330,7 @@ const ITEM_SORTS = {
   val: { label: "Value", def: "desc", asc: "Lowest first", desc: "Highest first" },
   rarity: { label: "Rarity", def: "asc", asc: "Lowest chance first", desc: "Highest chance first" },
   worth: { label: "Worth", def: "desc", asc: "Lowest first", desc: "Highest first" },
+  owned: { label: "Player ownership", def: "desc", asc: "Lowest first", desc: "Highest first" },
 };
 
 function itemSortState(route) {
@@ -382,7 +383,10 @@ function viewItems(route) {
       const order = directedNumber(sortableNumber(a.worth), sortableNumber(b.worth), sort.dir);
       if (order) return order;
     } else if (sort.key === "rarity") {
-      const order = directedNumber(sortableNumber(a.dropMin), sortableNumber(b.dropMin), sort.dir);
+      const order = directedNumber(combinedDrop(a), combinedDrop(b), sort.dir);
+      if (order) return order;
+    } else if (sort.key === "owned") {
+      const order = directedNumber(ownShare(a), ownShare(b), sort.dir);
       if (order) return order;
     }
     const name = a.name.localeCompare(b.name, "en-GB") || a.id - b.id;
@@ -451,6 +455,7 @@ function viewItem(route) {
       ${stat("Worth", num(item.worth))}
       ${stat("Cooldown", num(item.cooldown))}
       ${stat("Value", num(item.val))}
+      ${stat("Drop chance", dropPct(item))}
       ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players))}
       ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers))}
       ${stat("Attributes", attrText(item.attributes))}
@@ -463,6 +468,33 @@ function viewItem(route) {
 
 function stat(label, value) {
   return `<div class="stat"><b>${esc(String(value))}</b><span>${esc(label)}</span></div>`;
+}
+
+function combinedDrop(item) {
+  const drops = item.drops || [];
+  if (!drops.length) return null;
+  let miss = 1;
+  for (const drop of drops) {
+    const chance = Number(drop.chance);
+    if (!Number.isFinite(chance)) continue;
+    const p = Math.min(100, Math.max(0, chance)) / 100;
+    miss *= 1 - p;
+  }
+  return Math.min(100, (1 - miss) * 100);
+}
+
+function dropPct(item) {
+  const value = combinedDrop(item);
+  if (value === null) return "—";
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded >= 100) return "100%";
+  return rounded.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+}
+
+function ownShare(item) {
+  const players = Number(DB.meta.counts.players) || 0;
+  if (!players) return 0;
+  return (Number(item.owners) || 0) / players;
 }
 
 function ownPct(owners, total) {
