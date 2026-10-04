@@ -29,6 +29,7 @@ const SLOT_ORDER = [
 ];
 
 let DB = null;
+let routeStamp = "";
 const byId = { items: new Map(), mobs: new Map(), sets: new Map(), characters: new Map(), quests: new Map(), npcs: new Map() };
 let charShown = 80;
 let searchTimer = 0;
@@ -220,8 +221,11 @@ function render(scroll) {
     html = `<h1>Not found</h1><p>That page is not in the armoury. <a href="#/">Go home</a>.</p>`;
   }
   document.title = title;
+  const talkKey = section === "npc" && route.parts[1] ? "npc:" + route.parts[1] : "";
+  const sameTalk = talkKey !== "" && talkKey === routeStamp;
   main().innerHTML = html;
-  if (scroll && keepFocus === null) window.scrollTo(0, 0);
+  if (scroll && keepFocus === null && !sameTalk) window.scrollTo(0, 0);
+  routeStamp = talkKey || (section + ":" + (route.parts[1] || ""));
   if (section === "map") initMap();
   const box = document.getElementById("q");
   if (box && keepFocus !== null) {
@@ -1052,7 +1056,7 @@ function initMap() {
     if (!world) return;
     const tile = world.tile;
     const tilePx = tile * zoom;
-    if (overviewReady && tilePx < 10) {
+    if (overviewReady && tilePx < 4) {
       const ox = (world.minX * tile - camX) * zoom + cssW / 2;
       const oy = (world.minY * tile - camY) * zoom + cssH / 2;
       const ow = (world.maxX - world.minX + 1) * tilePx;
