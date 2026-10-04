@@ -389,6 +389,36 @@ def main() -> None:
         })
     for it in items:
         it["drops"] = drops_by_item.get(it["id"], [])
+        chances = [drop["chance"] for drop in it["drops"] if drop["chance"] is not None]
+        it["dropMin"] = min(chances) if chances else None
+
+    # Aggregate ownership only. Never write player ids or inventory rows.
+    level_rows = users.execute("SELECT LVL, COUNT(*) AS n FROM players GROUP BY LVL").fetchall()
+    player_count = sum(row["n"] for row in level_rows)
+    # A single level-100001 character sits far above everyone else. The cap is the
+    # highest level reached by more than one character.
+    capped = [row for row in level_rows if row["n"] > 1]
+    max_level = max(row["LVL"] for row in capped)
+    max_players = next(row["n"] for row in level_rows if row["LVL"] == max_level)
+    owners = {
+        row["ItemID"]: row["n"]
+        for row in users.execute(
+            "SELECT ItemID, COUNT(DISTINCT PlayerID) AS n FROM inventory "
+            "WHERE Amount > 0 AND PlayerID IN (SELECT id FROM players) GROUP BY ItemID"
+        )
+    }
+    max_owners = {
+        row["ItemID"]: row["n"]
+        for row in users.execute(
+            "SELECT ItemID, COUNT(DISTINCT PlayerID) AS n FROM inventory "
+            "WHERE Amount > 0 AND PlayerID IN (SELECT id FROM players WHERE LVL = ?) "
+            "GROUP BY ItemID",
+            (max_level,),
+        )
+    }
+    for it in items:
+        it["owners"] = owners.get(it["id"], 0)
+        it["maxOwners"] = max_owners.get(it["id"], 0)
 
     enemy_by_name = {}
     for row in enemy_rows:
@@ -678,6 +708,9 @@ def main() -> None:
                 "npcs": len(npcs),
                 "dialogue": len(nodes),
                 "tiles": len(world_doc["cells"]),
+                "players": player_count,
+                "maxLevel": max_level,
+                "maxPlayers": max_players,
             },
         },
         "items": items,
@@ -715,6 +748,7 @@ def main() -> None:
     print("broken item loot", broken_items)
     print("quests", len(quests), "npcs", len(npcs), "dialogue", len(nodes))
     print("owned mounts", sum(len(ch["mounts"]) for ch in characters), "buddies", sum(len(ch["buddies"]) for ch in characters))
+    print("players", player_count, "max level", max_level, "max-level players", max_players)
     print("json bytes", out.stat().st_size)
     print("world tiles", len(world_doc["cells"]), "world bytes", world_path.stat().st_size, "overview", overview_path.stat().st_size)
     # Guard: the sqlite files must not be written into the site.

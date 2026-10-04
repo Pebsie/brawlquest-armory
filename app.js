@@ -325,34 +325,73 @@ function charMeta(c) {
   return bits.join(" · ");
 }
 
+function itemSort(route) {
+  const sort = route.params.get("sort") || "name";
+  return ["val", "rarity", "worth"].includes(sort) ? sort : "name";
+}
+
+function sortableNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function compareNumbers(a, b) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
 function viewItems(route) {
   const q = route.params.get("q") || "";
   const type = route.params.get("type") || "";
+  const sort = itemSort(route);
   const types = [...new Set(DB.items.map((it) => it.type))].sort((a, b) => typeLabel(a).localeCompare(typeLabel(b), "en-GB"));
-  const chips = [`<a class="chip" href="${href(itemQuery("", q))}" ${type ? "" : 'aria-current="true"'}>All</a>`]
-    .concat(types.map((t) => `<a class="chip" href="${href(itemQuery(t, q))}" ${t === type ? 'aria-current="true"' : ""}>${esc(typeLabel(t))}</a>`))
+  const chips = [`<a class="chip" href="${href(itemQuery("", q, sort))}" ${type ? "" : 'aria-current="true"'}>All</a>`]
+    .concat(types.map((t) => `<a class="chip" href="${href(itemQuery(t, q, sort))}" ${t === type ? 'aria-current="true"' : ""}>${esc(typeLabel(t))}</a>`))
     .join("");
   let list = DB.items.slice();
   if (type) list = list.filter((it) => it.type === type);
-  if (q.trim()) {
-    list = list.filter((it) => rank(it.name, q) < 9 || lower(it.desc).includes(lower(q)));
-    list.sort((a, b) => rank(a.name, q) - rank(b.name, q) || a.name.localeCompare(b.name, "en-GB"));
-  } else {
-    list.sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
-  }
+  if (q.trim()) list = list.filter((it) => rank(it.name, q) < 9 || lower(it.desc).includes(lower(q)));
+  list.sort((a, b) => {
+    if (sort === "name" && q.trim()) {
+      const score = rank(a.name, q) - rank(b.name, q);
+      if (score) return score;
+    }
+    if (sort === "val") {
+      const order = compareNumbers(sortableNumber(b.val), sortableNumber(a.val));
+      if (order) return order;
+    } else if (sort === "worth") {
+      const order = compareNumbers(sortableNumber(b.worth), sortableNumber(a.worth));
+      if (order) return order;
+    } else if (sort === "rarity") {
+      const order = compareNumbers(sortableNumber(a.dropMin), sortableNumber(b.dropMin));
+      if (order) return order;
+    }
+    return a.name.localeCompare(b.name, "en-GB") || a.id - b.id;
+  });
+  const sorts = [
+    ["name", "Name"],
+    ["val", "Val"],
+    ["rarity", "Rarity"],
+    ["worth", "Worth"],
+  ].map(([key, label]) => `<button type="button" data-sort="${key}" aria-pressed="${sort === key}">${label}</button>`).join("");
   return `
     <h1>Items</h1>
     <label for="q">Search items</label>
     <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Item name" value="${esc(q)}">
     <div class="chips">${chips}</div>
+    <div class="sorts">${sorts}</div>
     <p class="count">${num(list.length)} shown</p>
     <div class="cards">${list.map(itemCard).join("") || "<p>No items match.</p>"}</div>`;
 }
 
-function itemQuery(type, q) {
+function itemQuery(type, q, sort) {
   const params = new URLSearchParams();
   if (type) params.set("type", type);
   if (q) params.set("q", q);
+  if (sort && sort !== "name") params.set("sort", sort);
   const tail = params.toString();
   return "/items" + (tail ? "?" + tail : "");
 }
@@ -387,6 +426,8 @@ function viewItem(route) {
       ${stat("Worth", num(item.worth))}
       ${stat("Cooldown", num(item.cooldown))}
       ${stat("Val", num(item.val))}
+      ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players))}
+      ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers))}
       ${stat("Attributes", attrText(item.attributes))}
     </div>
     <p>${set ? `Part of the <a href="#/set/${encodeURIComponent(set.id)}">${esc(set.name)}</a> set.` : "Not part of a named set."}</p>
@@ -397,6 +438,14 @@ function viewItem(route) {
 
 function stat(label, value) {
   return `<div class="stat"><b>${esc(String(value))}</b><span>${esc(label)}</span></div>`;
+}
+
+function ownPct(owners, total) {
+  const n = Number(owners) || 0;
+  const d = Number(total) || 0;
+  if (!n || !d) return "0%";
+  const value = Math.round((n / d) * 1000) / 10;
+  return value.toLocaleString("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
 }
 
 function viewMobs(route) {
@@ -904,11 +953,15 @@ document.body.addEventListener("click", (event) => {
   const sortBtn = event.target.closest("[data-sort]");
   if (sortBtn) {
     const route = parseRoute();
+    const section = route.parts[0] || "";
+    if (section !== "items" && section !== "characters") return;
     const params = new URLSearchParams(route.params);
-    params.set("sort", sortBtn.getAttribute("data-sort"));
+    const key = sortBtn.getAttribute("data-sort");
+    if (!key || key === "name") params.delete("sort");
+    else params.set("sort", key);
     charShown = 80;
     const tail = params.toString();
-    location.hash = "/characters" + (tail ? "?" + tail : "");
+    location.hash = "/" + section + (tail ? "?" + tail : "");
     return;
   }
   if (event.target.id === "more") {
