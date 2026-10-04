@@ -113,7 +113,7 @@ function dropText(drop) {
   const variance = Number(drop.variance) || 0;
   let amountText = "amount " + amount;
   if (variance) {
-    const min = amount - variance;
+    const min = Math.max(0, amount - variance);
     const max = amount + variance;
     amountText = min === max ? "amount " + min : "amount " + min + "-" + max;
   }
