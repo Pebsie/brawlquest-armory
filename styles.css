@@ -400,3 +400,31 @@ p { margin: 0.4rem 0 0.8rem; }
   .row .meta { text-align: left; }
   .hero { flex-direction: column; }
 }
+
+.fold { margin: 0.35rem 0 0.8rem; }
+.fold > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 48px;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-raise);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after {
+  content: "";
+  flex: 0 0 auto;
+  border: 5px solid transparent;
+  border-top-color: var(--gold);
+  margin-top: 0.3rem;
+}
+.fold[open] > summary::after { transform: rotate(180deg); margin-top: 0; }
+.fold .chips, .fold-list { margin-top: 0.55rem; }
+.fold-list { display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
+.fold-list .chip { justify-content: flex-start; width: 100%; }
+

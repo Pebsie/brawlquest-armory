@@ -325,9 +325,18 @@ function charMeta(c) {
   return bits.join(" · ");
 }
 
-function itemSort(route) {
-  const sort = route.params.get("sort") || "name";
-  return ["val", "rarity", "worth"].includes(sort) ? sort : "name";
+const ITEM_SORTS = {
+  name: { label: "Name", def: "asc", asc: "A to Z", desc: "Z to A" },
+  val: { label: "Value", def: "desc", asc: "Lowest first", desc: "Highest first" },
+  rarity: { label: "Rarity", def: "asc", asc: "Lowest chance first", desc: "Highest chance first" },
+  worth: { label: "Worth", def: "desc", asc: "Lowest first", desc: "Highest first" },
+};
+
+function itemSortState(route) {
+  const requested = route.params.get("sort") || "name";
+  const key = ITEM_SORTS[requested] ? requested : "name";
+  const dir = route.params.get("dir");
+  return { key, dir: dir === "asc" || dir === "desc" ? dir : ITEM_SORTS[key].def };
 }
 
 function sortableNumber(value) {
@@ -343,10 +352,17 @@ function compareNumbers(a, b) {
   return a - b;
 }
 
+function directedNumber(a, b, dir) {
+  const aMissing = a === null;
+  const bMissing = b === null;
+  if (aMissing || bMissing) return compareNumbers(a, b);
+  return dir === "desc" ? b - a : a - b;
+}
+
 function viewItems(route) {
   const q = route.params.get("q") || "";
   const type = route.params.get("type") || "";
-  const sort = itemSort(route);
+  const sort = itemSortState(route);
   const types = [...new Set(DB.items.map((it) => it.type))].sort((a, b) => typeLabel(a).localeCompare(typeLabel(b), "en-GB"));
   const chips = [`<a class="chip" href="${href(itemQuery("", q, sort))}" ${type ? "" : 'aria-current="true"'}>All</a>`]
     .concat(types.map((t) => `<a class="chip" href="${href(itemQuery(t, q, sort))}" ${t === type ? 'aria-current="true"' : ""}>${esc(typeLabel(t))}</a>`))
@@ -355,34 +371,42 @@ function viewItems(route) {
   if (type) list = list.filter((it) => it.type === type);
   if (q.trim()) list = list.filter((it) => rank(it.name, q) < 9 || lower(it.desc).includes(lower(q)));
   list.sort((a, b) => {
-    if (sort === "name" && q.trim()) {
+    if (sort.key === "name" && sort.dir === "asc" && q.trim()) {
       const score = rank(a.name, q) - rank(b.name, q);
       if (score) return score;
     }
-    if (sort === "val") {
-      const order = compareNumbers(sortableNumber(b.val), sortableNumber(a.val));
+    if (sort.key === "val") {
+      const order = directedNumber(sortableNumber(a.val), sortableNumber(b.val), sort.dir);
       if (order) return order;
-    } else if (sort === "worth") {
-      const order = compareNumbers(sortableNumber(b.worth), sortableNumber(a.worth));
+    } else if (sort.key === "worth") {
+      const order = directedNumber(sortableNumber(a.worth), sortableNumber(b.worth), sort.dir);
       if (order) return order;
-    } else if (sort === "rarity") {
-      const order = compareNumbers(sortableNumber(a.dropMin), sortableNumber(b.dropMin));
+    } else if (sort.key === "rarity") {
+      const order = directedNumber(sortableNumber(a.dropMin), sortableNumber(b.dropMin), sort.dir);
       if (order) return order;
     }
-    return a.name.localeCompare(b.name, "en-GB") || a.id - b.id;
+    const name = a.name.localeCompare(b.name, "en-GB") || a.id - b.id;
+    return sort.key === "name" && sort.dir === "desc" ? -name : name;
   });
-  const sorts = [
-    ["name", "Name"],
-    ["val", "Val"],
-    ["rarity", "Rarity"],
-    ["worth", "Worth"],
-  ].map(([key, label]) => `<button type="button" data-sort="${key}" aria-pressed="${sort === key}">${label}</button>`).join("");
+  const info = ITEM_SORTS[sort.key];
+  const options = Object.entries(ITEM_SORTS).map(([key, row]) => {
+    const active = key === sort.key;
+    const direction = active ? row[sort.dir] : row[row.def];
+    return `<button type="button" class="chip" data-item-sort="${key}" aria-pressed="${active}">${esc(row.label)} · ${esc(direction)}</button>`;
+  }).join("");
+  const typeSummary = type ? "Type: " + typeLabel(type) : "Types";
   return `
     <h1>Items</h1>
     <label for="q">Search items</label>
     <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Item name" value="${esc(q)}">
-    <div class="chips">${chips}</div>
-    <div class="sorts">${sorts}</div>
+    <details class="fold">
+      <summary>${esc(typeSummary)}</summary>
+      <div class="chips">${chips}</div>
+    </details>
+    <details class="fold">
+      <summary>Sort by ${esc(info.label)}, ${esc(info[sort.dir])}</summary>
+      <div class="fold-list">${options}</div>
+    </details>
     <p class="count">${num(list.length)} shown</p>
     <div class="cards">${list.map(itemCard).join("") || "<p>No items match.</p>"}</div>`;
 }
@@ -391,7 +415,8 @@ function itemQuery(type, q, sort) {
   const params = new URLSearchParams();
   if (type) params.set("type", type);
   if (q) params.set("q", q);
-  if (sort && sort !== "name") params.set("sort", sort);
+  if (sort.key !== "name") params.set("sort", sort.key);
+  if (sort.dir !== ITEM_SORTS[sort.key].def) params.set("dir", sort.dir);
   const tail = params.toString();
   return "/items" + (tail ? "?" + tail : "");
 }
@@ -425,7 +450,7 @@ function viewItem(route) {
       ${stat("Subtype", item.subtype || "—")}
       ${stat("Worth", num(item.worth))}
       ${stat("Cooldown", num(item.cooldown))}
-      ${stat("Val", num(item.val))}
+      ${stat("Value", num(item.val))}
       ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players))}
       ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers))}
       ${stat("Attributes", attrText(item.attributes))}
@@ -950,6 +975,24 @@ document.body.addEventListener("input", (event) => {
 });
 
 document.body.addEventListener("click", (event) => {
+  const itemSortBtn = event.target.closest("[data-item-sort]");
+  if (itemSortBtn) {
+    const route = parseRoute();
+    if ((route.parts[0] || "") !== "items") return;
+    const key = itemSortBtn.getAttribute("data-item-sort");
+    const info = ITEM_SORTS[key];
+    if (!info) return;
+    const current = itemSortState(route);
+    const dir = key === current.key ? (current.dir === "asc" ? "desc" : "asc") : info.def;
+    const params = new URLSearchParams(route.params);
+    if (key === "name") params.delete("sort");
+    else params.set("sort", key);
+    if (dir === info.def) params.delete("dir");
+    else params.set("dir", dir);
+    const tail = params.toString();
+    location.hash = "/items" + (tail ? "?" + tail : "");
+    return;
+  }
   const sortBtn = event.target.closest("[data-sort]");
   if (sortBtn) {
     const route = parseRoute();
