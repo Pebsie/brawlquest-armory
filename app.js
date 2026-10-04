@@ -117,7 +117,97 @@ function setNav(section) {
 }
 
 function closeNav() {
-  document.querySelectorAll(".nav .drop[open]").forEach((drop) => drop.removeAttribute("open"));
+  document.querySelectorAll(".nav .drop[open]").forEach((drop) => setDetailsOpen(drop, false));
+}
+
+function disclosurePanel(details) {
+  const summary = details.querySelector(":scope > summary");
+  return summary ? summary.nextElementSibling : null;
+}
+
+function armDisclosures(root) {
+  root.querySelectorAll("details").forEach((details) => {
+    if (details.dataset.disclose) return;
+    const panel = disclosurePanel(details);
+    const summary = details.querySelector(":scope > summary");
+    if (!panel || !summary) return;
+    details.dataset.disclose = "1";
+    panel.classList.add("disclose-panel");
+    if (!details.open) {
+      panel.style.height = "0px";
+      panel.style.opacity = "0";
+      panel.style.transform = "translateY(-4px)";
+    }
+    summary.addEventListener("click", (event) => {
+      event.preventDefault();
+      setDetailsOpen(details, !details.open || details.dataset.closing === "1");
+    });
+  });
+}
+
+function setDetailsOpen(details, open) {
+  const panel = disclosurePanel(details);
+  if (!panel || details.dataset.disclose !== "1") {
+    details.open = open;
+    return;
+  }
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (panel._discloseDone) {
+    panel.removeEventListener("transitionend", panel._discloseDone);
+    panel._discloseDone = null;
+  }
+  if (reduce) {
+    details.dataset.closing = "";
+    details.open = open;
+    panel.style.transition = "none";
+    panel.style.height = open ? "auto" : "0px";
+    panel.style.opacity = open ? "1" : "0";
+    panel.style.transform = open ? "none" : "translateY(-4px)";
+    return;
+  }
+  const motion = "height 160ms ease-in-out, opacity 160ms ease-in-out, transform 160ms ease-in-out";
+  const finish = (fn) => {
+    const done = (event) => {
+      if (event.target !== panel || event.propertyName !== "height") return;
+      panel.removeEventListener("transitionend", done);
+      if (panel._discloseDone === done) panel._discloseDone = null;
+      fn();
+    };
+    panel._discloseDone = done;
+    panel.addEventListener("transitionend", done);
+  };
+  if (open) {
+    details.dataset.closing = "";
+    details.open = true;
+    panel.style.transition = "none";
+    panel.style.height = "0px";
+    panel.style.opacity = "0";
+    panel.style.transform = "translateY(-4px)";
+    const target = panel.scrollHeight;
+    void panel.offsetHeight;
+    panel.style.transition = motion;
+    panel.style.height = target + "px";
+    panel.style.opacity = "1";
+    panel.style.transform = "translateY(0)";
+    finish(() => {
+      if (details.open && details.dataset.closing !== "1") panel.style.height = "auto";
+    });
+    return;
+  }
+  details.dataset.closing = "1";
+  panel.style.transition = "none";
+  panel.style.height = panel.scrollHeight + "px";
+  void panel.offsetHeight;
+  panel.style.transition = motion;
+  panel.style.height = "0px";
+  panel.style.opacity = "0";
+  panel.style.transform = "translateY(-4px)";
+  finish(() => {
+    if (details.dataset.closing === "1") {
+      details.open = false;
+      details.dataset.closing = "";
+    }
+  });
 }
 
 function dropText(drop) {
@@ -173,11 +263,12 @@ async function boot() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".nav .drop")) closeNav();
   });
+  armDisclosures(document);
   document.querySelectorAll(".nav .drop").forEach((drop) => {
     drop.addEventListener("toggle", () => {
       if (!drop.open) return;
       document.querySelectorAll(".nav .drop[open]").forEach((other) => {
-        if (other !== drop) other.removeAttribute("open");
+        if (other !== drop) setDetailsOpen(other, false);
       });
     });
   });
@@ -245,6 +336,7 @@ function render(scroll) {
   const talkKey = section === "npc" && route.parts[1] ? "npc:" + route.parts[1] : "";
   const sameTalk = talkKey !== "" && talkKey === routeStamp;
   main().innerHTML = html;
+  armDisclosures(main());
   if (scroll && keepFocus === null && !sameTalk) window.scrollTo(0, 0);
   routeStamp = talkKey || (section + ":" + (route.parts[1] || ""));
   if (section === "map") initMap();
