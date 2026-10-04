@@ -201,6 +201,89 @@ def derive_sets(items: list) -> list:
     return sets
 
 
+
+def build_world(content, image_paths):
+    """Compact tile index plus a 1-pixel-per-tile overview. Not a row dump."""
+    from PIL import Image
+
+    rows = list(content.execute(
+        "SELECT GroundTile, ForegroundTile, Name, X, Y, Collision, Enemy FROM world"
+    ))
+    min_x = min(r["X"] for r in rows)
+    max_x = max(r["X"] for r in rows)
+    min_y = min(r["Y"] for r in rows)
+    max_y = max(r["Y"] for r in rows)
+
+    grounds = [""]
+    fores = [""]
+    names = [""]
+    enemies = [""]
+    g_index = {"": 0}
+    f_index = {"": 0}
+    n_index = {"": 0}
+    e_index = {"": 0}
+    dot_cache = {}
+
+    def intern(table, index, value):
+        value = value or ""
+        if value not in index:
+            index[value] = len(table)
+            table.append(value)
+        return index[value]
+
+    def dot(path):
+        if not path:
+            return None
+        if path in dot_cache:
+            return dot_cache[path]
+        src = CLIENT_ROOT / path
+        if not src.is_file():
+            dot_cache[path] = None
+            return None
+        image = Image.open(src).convert("RGBA").resize((1, 1), Image.Resampling.BOX)
+        dot_cache[path] = image.getpixel((0, 0))
+        return dot_cache[path]
+
+    width = max_x - min_x + 1
+    height = max_y - min_y + 1
+    overview = Image.new("RGBA", (width, height), (0, 0, 0, 255))
+    pixels = overview.load()
+    cells = []
+    for row in rows:
+        ground = row["GroundTile"] or ""
+        fore = row["ForegroundTile"] or ""
+        if ground:
+            image_paths.add(ground)
+        if fore:
+            image_paths.add(fore)
+        gx = intern(grounds, g_index, ground)
+        fx = intern(fores, f_index, fore)
+        nx = intern(names, n_index, row["Name"] or "")
+        ex = intern(enemies, e_index, row["Enemy"] or "")
+        cells.append([row["X"], row["Y"], gx, fx, nx, int(row["Collision"] or 0), ex])
+        px = row["X"] - min_x
+        py = row["Y"] - min_y
+        colour = dot(ground) or (0, 0, 0, 255)
+        pixels[px, py] = colour
+        top = dot(fore)
+        if top and top[3] > 16:
+            pixels[px, py] = top
+    cells.sort(key=lambda cell: (cell[1], cell[0]))
+    doc = {
+        "minX": min_x,
+        "maxX": max_x,
+        "minY": min_y,
+        "maxY": max_y,
+        "tile": 32,
+        "grounds": grounds,
+        "fores": fores,
+        "names": names,
+        "enemies": enemies,
+        "cells": cells,
+    }
+    return doc, overview
+
+
 def main() -> None:
     content = sqlite3.connect(CONTENT_DB)
     content.row_factory = sqlite3.Row
@@ -548,6 +631,8 @@ def main() -> None:
             "returns": returns.get(row["id"], []),
         })
 
+    world_doc, world_overview = build_world(content, image_paths)
+
     for font in ("assets/ui/fonts/rainyhearts.ttf", "assets/ui/fonts/BMmini.TTF"):
         image_paths.add(font)
 
@@ -572,7 +657,7 @@ def main() -> None:
 
     payload = {
         "meta": {
-            "rev": "20261004-quests",
+            "rev": "20261004-map",
             "doll": {
                 "body": "assets/player/base.png",
                 "bodyW": body_w,
@@ -592,6 +677,7 @@ def main() -> None:
                 "quests": len(quests),
                 "npcs": len(npcs),
                 "dialogue": len(nodes),
+                "tiles": len(world_doc["cells"]),
             },
         },
         "items": items,
@@ -606,6 +692,11 @@ def main() -> None:
     out = ROOT / "data" / "armory.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    world_path = ROOT / "data" / "world.json"
+    world_path.write_text(json.dumps(world_doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    overview_path = ROOT / "assets" / "world" / "overview.png"
+    overview_path.parent.mkdir(parents=True, exist_ok=True)
+    world_overview.save(overview_path, optimize=True)
 
     print("items", len(items))
     print("mobs", len(mobs))
@@ -625,6 +716,7 @@ def main() -> None:
     print("quests", len(quests), "npcs", len(npcs), "dialogue", len(nodes))
     print("owned mounts", sum(len(ch["mounts"]) for ch in characters), "buddies", sum(len(ch["buddies"]) for ch in characters))
     print("json bytes", out.stat().st_size)
+    print("world tiles", len(world_doc["cells"]), "world bytes", world_path.stat().st_size, "overview", overview_path.stat().st_size)
     # Guard: the sqlite files must not be written into the site.
     assert not list(ROOT.rglob("*.db"))
 

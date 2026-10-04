@@ -165,7 +165,7 @@ async function boot() {
 function render(scroll) {
   const route = parseRoute();
   const section = route.parts[0] || "";
-  const navSection = { item: "items", mob: "mobs", set: "sets", character: "characters", quest: "quests", npc: "npcs" }[section] || section;
+  const navSection = { item: "items", mob: "mobs", set: "sets", character: "characters", quest: "quests", npc: "npcs", map: "map" }[section] || section;
   setNav(navSection);
   const keepFocus = document.activeElement && document.activeElement.id === "q"
     ? document.activeElement.selectionStart
@@ -213,12 +213,16 @@ function render(scroll) {
   } else if (section === "character") {
     html = viewCharacter(route);
     title = (byId.characters.get(Number(route.parts[1]))?.name || "Character") + " · BrawlQuest Armoury";
+  } else if (section === "map") {
+    title = "Map · BrawlQuest Armoury";
+    html = viewMap();
   } else {
     html = `<h1>Not found</h1><p>That page is not in the armoury. <a href="#/">Go home</a>.</p>`;
   }
   document.title = title;
   main().innerHTML = html;
   if (scroll && keepFocus === null) window.scrollTo(0, 0);
+  if (section === "map") initMap();
   const box = document.getElementById("q");
   if (box && keepFocus !== null) {
     box.focus();
@@ -236,7 +240,7 @@ function viewHome(route) {
   }
   return `
     <h1>BrawlQuest Armoury</h1>
-    <p class="lede">Gear, mobs, quests, NPCs, and every character.</p>
+    <p class="lede">Gear, mobs, quests, NPCs, characters, and the world map.</p>
     <label for="q">Search</label>
     <input id="q" class="search" type="search" enterkeyhint="search" autocomplete="off" placeholder="Try a name, a mob, or a weapon" value="${esc(q)}">
     ${results}
@@ -248,6 +252,7 @@ function viewHome(route) {
       <a href="#/quests"><b>${num(counts.quests)}</b> Quests</a>
       <a href="#/npcs"><b>${num(counts.npcs)}</b> NPCs</a>
       <a href="#/characters"><b>${num(counts.characters)}</b> Characters</a>
+      <a href="#/map"><b>${num(counts.tiles)}</b> Map tiles</a>
     </div>`;
 }
 
@@ -890,3 +895,334 @@ document.body.addEventListener("click", (event) => {
 document.body.addEventListener("submit", (event) => event.preventDefault());
 
 boot();
+
+
+let WORLD = null;
+let worldLoad = null;
+let mapToken = 0;
+
+function loadWorld() {
+  if (WORLD) return Promise.resolve(WORLD);
+  if (!worldLoad) {
+    worldLoad = fetch("data/world.json").then((res) => {
+      if (!res.ok) throw new Error("Map failed to load (" + res.status + ").");
+      return res.json();
+    }).then((data) => {
+      const at = new Map();
+      const buckets = new Map();
+      for (const cell of data.cells) {
+        const rec = {
+          x: cell[0], y: cell[1], gi: cell[2], fi: cell[3], ni: cell[4], col: cell[5], ei: cell[6],
+        };
+        at.set(rec.x + "," + rec.y, rec);
+        const key = (rec.x >> 3) + "," + (rec.y >> 3);
+        let bucket = buckets.get(key);
+        if (!bucket) buckets.set(key, bucket = []);
+        bucket.push(rec);
+      }
+      data.at = at;
+      data.buckets = buckets;
+      delete data.cells;
+      WORLD = data;
+      return data;
+    });
+  }
+  return worldLoad;
+}
+
+function viewMap() {
+  return `
+    <h1>World</h1>
+    <p class="lede">Drag to move. Scroll or pinch to zoom. Tap a tile for its name.</p>
+    <div class="sorts">
+      <button type="button" id="map-out">Zoom out</button>
+      <button type="button" id="map-in">Zoom in</button>
+      <button type="button" id="map-fit">Whole map</button>
+    </div>
+    <div class="map-stage"><canvas id="map" aria-label="BrawlQuest world map"></canvas></div>
+    <div id="map-info" class="note">Loading the map…</div>`;
+}
+
+function initMap() {
+  const token = ++mapToken;
+  const canvas = document.getElementById("map");
+  const info = document.getElementById("map-info");
+  if (!canvas || !info) return;
+  const ctx = canvas.getContext("2d");
+  const images = new Map();
+  const overview = new Image();
+  let overviewReady = false;
+  overview.onload = () => {
+    overviewReady = true;
+    if (token === mapToken) draw();
+  };
+  overview.src = "assets/world/overview.png";
+
+  let cssW = 1;
+  let cssH = 1;
+  let zoom = 1;
+  let camX = 0;
+  let camY = 0;
+  let selected = null;
+  let world = null;
+  const mobByName = new Map();
+  for (const mob of DB.mobs) {
+    if (!mobByName.has(mob.name)) mobByName.set(mob.name, mob);
+  }
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.getBoundingClientRect();
+    cssW = Math.max(1, rect.width);
+    cssH = Math.max(1, rect.height);
+    const bw = Math.max(1, Math.round(cssW * dpr));
+    const bh = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function clampZoom(value) {
+    return Math.min(4, Math.max(0.02, value));
+  }
+
+  function fit() {
+    if (!world) return;
+    const spanX = (world.maxX - world.minX + 1) * world.tile;
+    const spanY = (world.maxY - world.minY + 1) * world.tile;
+    zoom = clampZoom(Math.min(cssW / spanX, cssH / spanY) * 0.96);
+    camX = (world.minX + world.maxX + 1) * (world.tile / 2);
+    camY = (world.minY + world.maxY + 1) * (world.tile / 2);
+  }
+
+  function screenToWorld(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    return {
+      x: camX + (sx - cssW / 2) / zoom,
+      y: camY + (sy - cssH / 2) / zoom,
+      sx,
+      sy,
+    };
+  }
+
+  function sprite(path) {
+    if (!path) return null;
+    let image = images.get(path);
+    if (!image) {
+      image = new Image();
+      image.onload = () => {
+        if (token === mapToken) draw();
+      };
+      image.src = imgUrl(path);
+      images.set(path, image);
+    }
+    return image.complete && image.naturalWidth ? image : null;
+  }
+
+  function tileAt(x, y) {
+    return world ? world.at.get(x + "," + y) || null : null;
+  }
+
+  function showInfo(tile, x, y) {
+    if (!world) return;
+    if (!tile) {
+      info.innerHTML = `<p>X ${num(x)}, Y ${num(y)}</p><p>No tile there.</p>`;
+      return;
+    }
+    const name = world.names[tile.ni] || "—";
+    const enemy = world.enemies[tile.ei] || "";
+    let enemyHtml = "—";
+    if (enemy) {
+      const mob = mobByName.get(enemy);
+      enemyHtml = mob ? `<a href="#/mob/${mob.id}">${esc(enemy)}</a>` : esc(enemy);
+    }
+    info.innerHTML = `<p><b>${esc(name || "—")}</b></p><p>X ${num(tile.x)}, Y ${num(tile.y)}</p><p>Collision: ${tile.col ? "yes" : "no"}</p><p>Enemy: ${enemyHtml}</p>`;
+  }
+
+  function draw() {
+    if (token !== mapToken) return;
+    resize();
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, cssW, cssH);
+    if (!world) return;
+    const tile = world.tile;
+    const tilePx = tile * zoom;
+    if (overviewReady && tilePx < 10) {
+      const ox = (world.minX * tile - camX) * zoom + cssW / 2;
+      const oy = (world.minY * tile - camY) * zoom + cssH / 2;
+      const ow = (world.maxX - world.minX + 1) * tilePx;
+      const oh = (world.maxY - world.minY + 1) * tilePx;
+      ctx.drawImage(overview, ox, oy, ow, oh);
+    } else {
+      const x0 = Math.floor((camX - cssW / 2 / zoom) / tile) - 1;
+      const y0 = Math.floor((camY - cssH / 2 / zoom) / tile) - 1;
+      const x1 = Math.floor((camX + cssW / 2 / zoom) / tile) + 1;
+      const y1 = Math.floor((camY + cssH / 2 / zoom) / tile) + 1;
+      const size = Math.ceil(tilePx);
+      for (let cx = x0 >> 3; cx <= x1 >> 3; cx++) {
+        for (let cy = y0 >> 3; cy <= y1 >> 3; cy++) {
+          const bucket = world.buckets.get(cx + "," + cy);
+          if (!bucket) continue;
+          for (const cell of bucket) {
+            if (cell.x < x0 || cell.x > x1 || cell.y < y0 || cell.y > y1) continue;
+            const sx = Math.round((cell.x * tile - camX) * zoom + cssW / 2);
+            const sy = Math.round((cell.y * tile - camY) * zoom + cssH / 2);
+            const ground = sprite(world.grounds[cell.gi]);
+            const fore = sprite(world.fores[cell.fi]);
+            if (ground) ctx.drawImage(ground, sx, sy, size, size);
+            if (fore) ctx.drawImage(fore, sx, sy, size, size);
+          }
+        }
+      }
+    }
+    if (selected) {
+      const sx = Math.round((selected.x * tile - camX) * zoom + cssW / 2);
+      const sy = Math.round((selected.y * tile - camY) * zoom + cssH / 2);
+      const size = Math.max(2, Math.ceil(tilePx));
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx + 1, sy + 1, Math.max(1, size - 2), Math.max(1, size - 2));
+    }
+  }
+
+  function zoomAt(clientX, clientY, next) {
+    const before = screenToWorld(clientX, clientY);
+    zoom = clampZoom(next);
+    const rect = canvas.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    camX = before.x - (sx - cssW / 2) / zoom;
+    camY = before.y - (sy - cssH / 2) / zoom;
+    draw();
+  }
+
+  const pointers = new Map();
+  let drag = null;
+  let pinch = null;
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (token !== mapToken) return;
+    canvas.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size >= 2) {
+      drag = null;
+      pinch = null;
+      canvas.classList.add("dragging");
+    } else {
+      drag = { x: event.clientX, y: event.clientY, camX, camY, moved: false };
+      canvas.classList.add("dragging");
+    }
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (token !== mapToken || !pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size >= 2) {
+      const pts = [...pointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+      const midX = (pts[0].x + pts[1].x) / 2;
+      const midY = (pts[0].y + pts[1].y) / 2;
+      if (!pinch) {
+        const worldPoint = screenToWorld(midX, midY);
+        pinch = { dist, zoom, wx: worldPoint.x, wy: worldPoint.y };
+      }
+      zoom = clampZoom(pinch.zoom * (dist / pinch.dist));
+      const rect = canvas.getBoundingClientRect();
+      camX = pinch.wx - (midX - rect.left - cssW / 2) / zoom;
+      camY = pinch.wy - (midY - rect.top - cssH / 2) / zoom;
+      draw();
+      return;
+    }
+    if (!drag) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (dx * dx + dy * dy > 16) drag.moved = true;
+    camX = drag.camX - dx / zoom;
+    camY = drag.camY - dy / zoom;
+    draw();
+  });
+  function endPointer(event) {
+    if (!pointers.has(event.pointerId)) return;
+    const wasDrag = drag;
+    pointers.delete(event.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) {
+      canvas.classList.remove("dragging");
+      if (wasDrag && !wasDrag.moved && world) {
+        const point = screenToWorld(event.clientX, event.clientY);
+        const tx = Math.floor(point.x / world.tile);
+        const ty = Math.floor(point.y / world.tile);
+        selected = tileAt(tx, ty) || { x: tx, y: ty, empty: true };
+        showInfo(selected.empty ? null : selected, tx, ty);
+        draw();
+      }
+      drag = null;
+    } else if (pointers.size === 1) {
+      const left = [...pointers.values()][0];
+      drag = { x: left.x, y: left.y, camX, camY, moved: true };
+    }
+  }
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("wheel", (event) => {
+    if (token !== mapToken) return;
+    event.preventDefault();
+    let dy = event.deltaY;
+    if (event.deltaMode === 1) dy *= 16;
+    else if (event.deltaMode === 2) dy *= cssH;
+    zoomAt(event.clientX, event.clientY, zoom * Math.exp(-dy * 0.0015));
+  }, { passive: false });
+
+  document.getElementById("map-in").addEventListener("click", () => {
+    zoomAt(canvas.getBoundingClientRect().left + cssW / 2, canvas.getBoundingClientRect().top + cssH / 2, zoom * 1.25);
+  });
+  document.getElementById("map-out").addEventListener("click", () => {
+    const rect = canvas.getBoundingClientRect();
+    zoomAt(rect.left + cssW / 2, rect.top + cssH / 2, zoom / 1.25);
+  });
+  document.getElementById("map-fit").addEventListener("click", () => {
+    fit();
+    draw();
+  });
+
+  function onKey(event) {
+    if (token !== mapToken) {
+      window.removeEventListener("keydown", onKey);
+      return;
+    }
+    if (event.key === "ArrowLeft") camX -= 64;
+    else if (event.key === "ArrowRight") camX += 64;
+    else if (event.key === "ArrowUp") camY -= 64;
+    else if (event.key === "ArrowDown") camY += 64;
+    else if (event.key === "+" || event.key === "=") zoom = clampZoom(zoom * 1.25);
+    else if (event.key === "-" || event.key === "_") zoom = clampZoom(zoom / 1.25);
+    else return;
+    event.preventDefault();
+    draw();
+  }
+  window.addEventListener("keydown", onKey);
+  const onResize = () => {
+    if (token !== mapToken) {
+      window.removeEventListener("resize", onResize);
+      return;
+    }
+    draw();
+  };
+  window.addEventListener("resize", onResize);
+
+  resize();
+  loadWorld().then((data) => {
+    if (token !== mapToken) return;
+    world = data;
+    fit();
+    info.textContent = "Tap a tile. Drag to move. Scroll or pinch to zoom.";
+    draw();
+  }).catch((err) => {
+    if (token !== mapToken) return;
+    info.innerHTML = `<p class="err">${esc(err.message || "Could not load the map.")}</p>`;
+  });
+}

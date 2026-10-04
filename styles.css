@@ -124,7 +124,7 @@ p { margin: 0.35rem 0 0.7rem; }
   padding: 0.55rem 0.7rem;
   margin: 0.35rem 0 0.7rem;
 }
-.search:focus, .choice:focus, .nav a:focus {
+.search:focus, .choice:focus, .nav a:focus, .sorts button:focus {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
@@ -326,3 +326,22 @@ p { margin: 0.35rem 0 0.7rem; }
   .row .meta { text-align: left; }
   .hero { flex-direction: column; }
 }
+
+.map-stage {
+  background: #000;
+  border: 2px solid #fff;
+  height: min(70vh, 720px);
+  min-height: 280px;
+  touch-action: none;
+}
+.map-stage canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.map-stage canvas.dragging { cursor: grabbing; }
+
