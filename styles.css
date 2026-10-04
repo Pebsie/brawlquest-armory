@@ -26,7 +26,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 32px/48px var(--read);
+  font: 18px/28px var(--read);
   font-weight: 400;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: grayscale;
@@ -71,10 +71,10 @@ a:hover { color: #fff; }
   color: #fff;
   text-decoration: none;
   font-family: var(--display);
-  font-size: 32px;
-  line-height: 40px;
+  font-size: 22px;
+  line-height: 28px;
   font-weight: 400;
-  min-height: 48px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
 }
@@ -84,11 +84,11 @@ a:hover { color: #fff; }
   color: #fff;
   text-decoration: none;
   font-family: var(--display);
-  font-size: 32px;
-  line-height: 40px;
+  font-size: 16px;
+  line-height: 22px;
   font-weight: 400;
-  min-height: 48px;
-  padding: 4px 16px;
+  min-height: 44px;
+  padding: 4px 12px;
   border: 2px solid #fff;
   background: #000;
   display: inline-flex;
@@ -139,8 +139,8 @@ h1, h2, h3 {
   margin: 0 0 16px;
   color: #fff;
 }
-h1 { font-size: 48px; line-height: 56px; }
-h2 { font-size: 32px; line-height: 40px; margin-top: 32px; }
+h1 { font-size: 28px; line-height: 36px; }
+h2 { font-size: 22px; line-height: 28px; margin-top: 32px; }
 p { margin: 0 0 16px; }
 .lede, .sub, .count, .foot, .row .meta, .stat span, .slot.empty { color: #fff; }
 .lede { max-width: 40rem; }
@@ -149,15 +149,15 @@ p { margin: 0 0 16px; }
 
 .search, .chip, .sorts button, .more, .choice, .fold > summary {
   font-family: var(--read);
-  font-size: 32px;
-  line-height: 40px;
+  font-size: 18px;
+  line-height: 28px;
   font-weight: 400;
   color: #fff;
   background: #000;
   border: 2px solid #fff;
   border-radius: 0;
   box-shadow: none;
-  min-height: 48px;
+  min-height: 44px;
 }
 .search {
   width: 100%;
@@ -206,7 +206,7 @@ p { margin: 0 0 16px; }
 }
 .card:hover, .row:hover, .slot:hover, .home-links a:hover, .choice:hover { background: #fff; color: #000; }
 .card:hover .sub, .slot:hover .sub, .row:hover .meta, .home-links a:hover, .home-links a:hover b { color: #000; }
-.card strong, .slot strong { font-size: 32px; line-height: 40px; font-weight: 400; }
+.card strong, .slot strong { font-size: 18px; line-height: 28px; font-weight: 400; }
 
 .icon {
   width: auto;
@@ -246,12 +246,12 @@ p { margin: 0 0 16px; }
 .stat b {
   display: block;
   font-family: var(--display);
-  font-size: 32px;
-  line-height: 40px;
+  font-size: 22px;
+  line-height: 28px;
   font-weight: 400;
 }
-.stat span { display: block; font-size: 32px; line-height: 40px; }
-.stat .n { display: block; margin-top: 8px; font-size: 32px; line-height: 40px; color: #fff; }
+.stat span { display: block; font-size: 16px; line-height: 22px; }
+.stat .n { display: block; margin-top: 4px; font-size: 16px; line-height: 22px; color: #fff; }
 
 .note { padding: 16px; margin: 16px 0; }
 .drop {
@@ -269,8 +269,8 @@ p { margin: 0 0 16px; }
   color: #fff;
   border-radius: 0;
   padding: 0 8px;
-  font-size: 32px;
-  line-height: 40px;
+  font-size: 16px;
+  line-height: 22px;
   margin-left: 8px;
   font-family: var(--read);
   font-weight: 400;
@@ -319,8 +319,8 @@ p { margin: 0 0 16px; }
 .home-links a b {
   display: block;
   font-family: var(--display);
-  font-size: 48px;
-  line-height: 56px;
+  font-size: 28px;
+  line-height: 36px;
   font-weight: 400;
   color: #fff;
 }
@@ -364,7 +364,7 @@ p { margin: 0 0 16px; }
   margin-bottom: 16px;
 }
 .talk-portrait .icon { background: transparent; }
-.line { font-size: 32px; line-height: 48px; }
+.line { font-size: 18px; line-height: 28px; }
 .choices { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; align-items: flex-start; }
 .choice {
   display: block;
