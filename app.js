@@ -548,8 +548,8 @@ function viewItem(route) {
       ${stat("Cooldown", num(item.cooldown))}
       ${stat("Value", num(item.val))}
       ${stat("Drop chance", dropPct(item))}
-      ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players))}
-      ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers))}
+      ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players), num(item.owners))}
+      ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers), num(item.maxOwners))}
       ${stat("Attributes", attrText(item.attributes))}
     </div>
     <p>${set ? `Part of the <a href="#/set/${encodeURIComponent(set.id)}">${esc(set.name)}</a> set.` : "Not part of a named set."}</p>
@@ -558,8 +558,9 @@ function viewItem(route) {
     ${drops || "<p>No loot rows for this item.</p>"}`;
 }
 
-function stat(label, value) {
-  return `<div class="stat"><b>${esc(String(value))}</b><span>${esc(label)}</span></div>`;
+function stat(label, value, note) {
+  const extra = note === undefined || note === null || note === "" ? "" : `<span class="n">${esc(String(note))}</span>`;
+  return `<div class="stat"><b>${esc(String(value))}</b><span>${esc(label)}</span>${extra}</div>`;
 }
 
 function combinedDrop(item) {

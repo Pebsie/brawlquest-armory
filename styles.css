@@ -253,6 +253,7 @@ p { margin: 0.4rem 0 0.8rem; }
 .stat { padding: 0.7rem 0.8rem; }
 .stat b { display: block; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: 0.85rem; }
+.stat .n { display: block; font-size: 0.75rem; }
 
 .note {
   background: #231c14;
