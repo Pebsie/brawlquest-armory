@@ -111,6 +111,13 @@ function setNav(section) {
     if (on) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
+  document.querySelectorAll(".nav .drop").forEach((drop) => {
+    drop.classList.toggle("is-current", !!drop.querySelector("a[aria-current='page']"));
+  });
+}
+
+function closeNav() {
+  document.querySelectorAll(".nav .drop[open]").forEach((drop) => drop.removeAttribute("open"));
 }
 
 function dropText(drop) {
@@ -159,7 +166,21 @@ async function boot() {
     byId.quests.set(quest.id, quest);
   }
   for (const npc of DB.npcs || []) byId.npcs.set(npc.id, npc);
-  window.addEventListener("hashchange", () => render(true));
+  window.addEventListener("hashchange", () => {
+    closeNav();
+    render(true);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".nav .drop")) closeNav();
+  });
+  document.querySelectorAll(".nav .drop").forEach((drop) => {
+    drop.addEventListener("toggle", () => {
+      if (!drop.open) return;
+      document.querySelectorAll(".nav .drop[open]").forEach((other) => {
+        if (other !== drop) other.removeAttribute("open");
+      });
+    });
+  });
   render(true);
 }
 

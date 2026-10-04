@@ -8,28 +8,35 @@
   <meta name="theme-color" content="#14120e">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body data-rev="armory-rev-20261004-warm">
-  <!-- armory-rev-20261004-warm -->
+<body data-rev="armory-rev-20261004-nav">
+  <!-- armory-rev-20261004-nav -->
   <a class="skip" href="#main">Skip to content</a>
   <header class="top">
     <div class="wrap top-inner">
       <a class="brand" href="#/">BrawlQuest <span>Armoury</span></a>
       <nav class="nav" aria-label="Sections">
-        <a href="#/items">Items</a>
-        <a href="#/mobs">Mobs</a>
-        <a href="#/sets">Sets</a>
-        <a href="#/recipes">Recipes</a>
-        <a href="#/quests">Quests</a>
-        <a href="#/npcs">NPCs</a>
+        <details class="drop">
+          <summary>World</summary>
+          <div class="menu">
+            <a href="#/mobs">Mobs</a>
+            <a href="#/map">Map</a>
+            <a href="#/npcs">NPCs</a>
+            <a href="#/quests">Quests</a>
+          </div>
+        </details>
+        <details class="drop">
+          <summary>Gear</summary>
+          <div class="menu">
+            <a href="#/items">Items</a>
+            <a href="#/sets">Sets</a>
+            <a href="#/recipes">Recipes</a>
+          </div>
+        </details>
         <a href="#/characters">Characters</a>
-        <a href="#/map">Map</a>
       </nav>
     </div>
   </header>
   <main id="main" class="wrap"></main>
-  <footer class="wrap foot">
-    <p>Game characters only. No accounts. Figures are taken from the catalogue and are not estimated.</p>
-  </footer>
   <noscript><p class="wrap">This armoury needs JavaScript to load the catalogue.</p></noscript>
   <script src="app.js"></script>
 </body>
