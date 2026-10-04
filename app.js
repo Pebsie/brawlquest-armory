@@ -82,6 +82,15 @@ function attrText(attrs) {
   return attrs.map((a) => (a.value === null || a.value === undefined ? a.stat : `${a.stat} ${a.value}`)).join(", ");
 }
 
+function attrSentence(attrs) {
+  if (!attrs || !attrs.length) return "";
+  const bits = attrs.map((a) => (
+    a.value === null || a.value === undefined ? a.stat : `${a.stat} by ${a.value}`
+  ));
+  if (bits.length === 1) return `Increases your ${bits[0]}`;
+  return `Increases your ${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
+}
+
 function rank(name, q) {
   const n = lower(name);
   const query = lower(q);
@@ -550,7 +559,7 @@ function viewItem(route) {
       ${stat("Drop chance", dropPct(item))}
       ${stat("Owned by players", ownPct(item.owners, DB.meta.counts.players), num(item.owners))}
       ${stat("Owned at level " + num(DB.meta.counts.maxLevel), ownPct(item.maxOwners, DB.meta.counts.maxPlayers), num(item.maxOwners))}
-      ${stat("Attributes", attrText(item.attributes))}
+      ${item.attributes && item.attributes.length ? stat("Attributes", attrSentence(item.attributes)) : ""}
     </div>
     <p>${set ? `Part of the <a href="#/set/${encodeURIComponent(set.id)}">${esc(set.name)}</a> set.` : "Not part of a named set."}</p>
     ${recipeBlock(item)}
